@@ -1,5 +1,6 @@
 const express = require('express');
 const admin = require('firebase-admin');
+const crypto = require('crypto');
 
 admin.initializeApp({
   credential: admin.credential.cert({
@@ -50,42 +51,57 @@ app.post('/storeBlockchain', async (req, res) => {
     }
 });
 
-// 🔍 VERIFY TAMPER-PROOF
 app.post('/verifyEvidence', async (req, res) => {
     try {
         const { evidenceId } = req.body;
 
-        // 1. Get original data
+        // 1. Get evidence data from Firestore
         const evidenceDoc = await db.collection("evidence").doc(evidenceId).get();
 
         if (!evidenceDoc.exists) {
-            return res.send({ status: "NOT FOUND" });
+            return res.send({ success: false, message: "Evidence not found" });
         }
 
         const evidenceData = evidenceDoc.data();
 
-        // 2. Get blockchain data
+        // 🔥 Extract metadata + CID
+        const metadata = evidenceData.metadata;
+        const cid = evidenceData.cid;
+
+        if (!metadata || !cid) {
+            return res.send({ success: false, message: "Metadata or CID missing" });
+        }
+
+        // 2. Recompute hash
+        const combinedData = `metadata:${metadata}|cid:${cid}`;
+        const recalculatedHash = generateHash(combinedData);
+
+        // 3. Get blockchain stored hash
         const blockchainDoc = await db.collection("blockchain").doc(evidenceId).get();
 
         if (!blockchainDoc.exists) {
-            return res.send({ status: "NO BLOCKCHAIN RECORD" });
+            return res.send({ success: false, message: "No blockchain record found" });
         }
 
         const blockchainData = blockchainDoc.data();
+        const storedHash = blockchainData.metadata_hash;
 
-        // 3. Compare hashes
-        const isValid = evidenceData.metadata_hash === blockchainData.metadata_hash;
+        // 4. Compare hashes
+        const isValid = recalculatedHash === storedHash;
 
-        // 4. Result
+        // 5. Send response
         res.send({
+            success: true,
             evidenceId,
-            result: isValid ? "TAMPER-PROOF ✅" : "TAMPERED ❌",
-            firestore_hash: evidenceData.metadata_hash,
-            blockchain_hash: blockchainData.metadata_hash
+            status: isValid ? "VALID" : "TAMPERED",
+            recalculated_hash: recalculatedHash,
+            blockchain_hash: storedHash,
+            metadata,
+            cid
         });
 
     } catch (error) {
-        res.send({ status: "ERROR", message: error.message });
+        res.send({ success: false, message: error.message });
     }
 });
 
@@ -100,6 +116,11 @@ app.get('/verifyEvidence', (req, res) => {
 app.get('/storeBlockchain', (req, res) => {
     res.send("❌ Use POST method for /storeBlockchain");
 });
+
+
+function generateHash(data) {
+    return crypto.createHash('sha256').update(data).digest('hex');
+}
 
 // ✅ IMPORTANT (Render uses dynamic port)
 const PORT = process.env.PORT || 3000;
