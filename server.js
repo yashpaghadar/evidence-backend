@@ -86,7 +86,7 @@ app.post('/verifyEvidence', async (req, res) => {
 
         // 🔥 Extract metadata + CID
         const metadata = evidenceData.metadata;
-        const cid = evidenceData.cid;
+        const cid = evidenceData.file_cid;
 
         if (!metadata || !cid) {
             return res.send({ success: false, message: "Metadata or CID missing" });
