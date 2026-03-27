@@ -116,18 +116,16 @@ app.post('/verifyEvidence', async (req, res) => {
         const recalculatedHash = generateHash(combinedData);
 
         // ✅ 3. Get blockchain stored hash (FIXED QUERY)
-        const blockchainSnapshot = await db.collection("blockchain")
-            .where("evidence_id", "==", evidenceId)
-            .get();
+        const blockchainDoc = await db.collection("blockchain").doc(evidenceId).get();
 
-        if (blockchainSnapshot.empty) {
+        if (!blockchainDoc.exists) {
             return res.status(404).json({
                 success: false,
                 message: "No blockchain record found"
             });
         }
 
-        const blockchainData = blockchainSnapshot.docs[0].data();
+        const blockchainData = blockchainDoc.data();
         const storedHash = blockchainData.metadata_hash;
 
         // ✅ 4. Compare hashes
