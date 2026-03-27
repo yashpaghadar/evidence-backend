@@ -6,8 +6,9 @@ admin.initializeApp({
   credential: admin.credential.cert({
     projectId: process.env.FIREBASE_PROJECT_ID,
     clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-  }),
+    privateKey: process.env.FIREBASE_PRIVATE_KEY
+    ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+    : undefined,  }),
 });
 
 const db = admin.firestore();
@@ -24,30 +25,49 @@ app.post('/storeBlockchain', async (req, res) => {
         const doc = await db.collection("evidence").doc(evidenceId).get();
 
         if (!doc.exists) {
-            return res.send({ status: "NOT FOUND" });
+            return res.send({ success: false, message: "Evidence not found" });
         }
 
         const data = doc.data();
 
-        // 2. Extract ONLY required fields
+        // 🔥 Extract required fields
+        const metadata = data.metadata;
+        const metadataHash = data.metadata_hash;
+
+        if (!metadata || !metadataHash) {
+            return res.send({
+                success: false,
+                message: "Metadata or hash missing"
+            });
+        }
+
+        // 2. Prepare blockchain data (UPDATED)
         const blockchainData = {
-            evidenceId: data.evidence_id,
-            metadata_hash: data.metadata_hash,
-            timestamp: data.created_at
+            evidenceId: evidenceId,        // ✅ correct
+            metadata: metadata,            // ✅ added
+            metadata_hash: metadataHash    // ✅ correct
         };
 
         // 3. Save into blockchain collection
-        await db.collection("blockchain").doc(evidenceId).set(blockchainData);
+        await db.collection("blockchain")
+                .doc(evidenceId)
+                .set(blockchainData);
 
         console.log("✅ Stored in blockchain:", blockchainData);
 
         res.send({
-            status: "SUCCESS",
+            success: true,
+            message: "Stored on blockchain",
             blockchainData
         });
 
     } catch (error) {
-        res.send({ status: "ERROR", message: error.message });
+        console.error("STORE ERROR:", error);
+
+        res.status(500).send({
+            success: false,
+            message: error.message
+        });
     }
 });
 
@@ -71,7 +91,8 @@ app.post('/verifyEvidence', async (req, res) => {
         if (!metadata || !cid) {
             return res.send({ success: false, message: "Metadata or CID missing" });
         }
-
+        console.log("Evidence ID:", evidenceId);
+        console.log("Firebase Data:", evidenceData);
         // 2. Recompute hash
         const combinedData = `metadata:${metadata}|cid:${cid}`;
         const recalculatedHash = generateHash(combinedData);
@@ -101,7 +122,12 @@ app.post('/verifyEvidence', async (req, res) => {
         });
 
     } catch (error) {
-        res.send({ success: false, message: error.message });
+        res.send({ status: "ERROR", message: error.message });
+        console.error("VERIFY ERROR:", error);
+        res.status(500).send({
+            success: false,
+            message: error.message
+        });
     }
 });
 
