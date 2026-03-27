@@ -70,48 +70,71 @@ app.post('/storeBlockchain', async (req, res) => {
         });
     }
 });
-
 app.post('/verifyEvidence', async (req, res) => {
     try {
         const { evidenceId } = req.body;
 
-        // 1. Get evidence data from Firestore
-        const evidenceDoc = await db.collection("evidence").doc(evidenceId).get();
-
-        if (!evidenceDoc.exists) {
-            return res.send({ success: false, message: "Evidence not found" });
+        // ✅ Validate input
+        if (!evidenceId) {
+            return res.status(400).json({
+                success: false,
+                message: "evidenceId is required"
+            });
         }
 
-        const evidenceData = evidenceDoc.data();
+        console.log("Evidence ID:", evidenceId);
+
+        // ✅ 1. Get evidence from Firestore (FIXED QUERY)
+        const evidenceSnapshot = await db.collection("evidence")
+            .where("evidence_id", "==", evidenceId)
+            .get();
+
+        if (evidenceSnapshot.empty) {
+            return res.status(404).json({
+                success: false,
+                message: "Evidence not found"
+            });
+        }
+
+        const evidenceData = evidenceSnapshot.docs[0].data();
+
+        console.log("Firebase Data:", evidenceData);
 
         // 🔥 Extract metadata + CID
         const metadata = evidenceData.metadata;
         const cid = evidenceData.file_cid;
 
         if (!metadata || !cid) {
-            return res.send({ success: false, message: "Metadata or CID missing" });
+            return res.status(400).json({
+                success: false,
+                message: "Metadata or CID missing"
+            });
         }
-        console.log("Evidence ID:", evidenceId);
-        console.log("Firebase Data:", evidenceData);
-        // 2. Recompute hash
+
+        // ✅ 2. Recompute hash
         const combinedData = `metadata:${metadata}|cid:${cid}`;
         const recalculatedHash = generateHash(combinedData);
 
-        // 3. Get blockchain stored hash
-        const blockchainDoc = await db.collection("blockchain").doc(evidenceId).get();
+        // ✅ 3. Get blockchain stored hash (FIXED QUERY)
+        const blockchainSnapshot = await db.collection("blockchain")
+            .where("evidence_id", "==", evidenceId)
+            .get();
 
-        if (!blockchainDoc.exists) {
-            return res.send({ success: false, message: "No blockchain record found" });
+        if (blockchainSnapshot.empty) {
+            return res.status(404).json({
+                success: false,
+                message: "No blockchain record found"
+            });
         }
 
-        const blockchainData = blockchainDoc.data();
+        const blockchainData = blockchainSnapshot.docs[0].data();
         const storedHash = blockchainData.metadata_hash;
 
-        // 4. Compare hashes
+        // ✅ 4. Compare hashes
         const isValid = recalculatedHash === storedHash;
 
-        // 5. Send response
-        res.send({
+        // ✅ 5. Send response (ONLY ONCE)
+        return res.json({
             success: true,
             evidenceId,
             status: isValid ? "VALID" : "TAMPERED",
@@ -122,9 +145,10 @@ app.post('/verifyEvidence', async (req, res) => {
         });
 
     } catch (error) {
-        res.send({ status: "ERROR", message: error.message });
         console.error("VERIFY ERROR:", error);
-        res.status(500).send({
+
+        // ✅ Only ONE response in catch
+        return res.status(500).json({
             success: false,
             message: error.message
         });
